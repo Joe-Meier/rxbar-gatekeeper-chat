@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>No B.S. Gatekeeper Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-white text-black">
+  <div class="min-h-screen flex items-center justify-center px-4 py-8">
+    <div class="w-full max-w-3xl bg-white border border-neutral-200 rounded-2xl shadow-sm flex flex-col md:flex-row overflow-hidden">
+      <!-- Left: Header / info -->
+      <div class="md:w-1/3 border-b md:border-b-0 md:border-r border-neutral-200 bg-neutral-50 p-4 flex flex-col justify-between">
+        <div>
+          <span class="inline-block px-2 py-0.5 bg-black text-white text-[10px] tracking-[0.18em] uppercase rounded-sm mb-2">
+            No B.S.
+          </span>
+          <h1 class="text-lg font-semibold leading-tight">Gatekeeper Chat</h1>
+          <p class="text-[12px] text-neutral-600 mt-1">
+            A brutally honest assistant that decides if you’re allowed to contact them.
+          </p>
+          <p class="text-[11px] text-neutral-500 mt-3">
+            Spoiler: you’re never actually allowed.
+          </p>
+        </div>
+
+        <div class="mt-6 text-[11px] text-neutral-600 space-y-1">
+          <p><span class="font-semibold">Status:</span> Protecting their PTO.</p>
+          <p><span class="font-semibold">Rule:</span> You will be endlessly evaluated.</p>
+        </div>
+
+        <div class="mt-6 border-t border-neutral-200 pt-3 text-[11px] text-neutral-500">
+          <p>After 15 messages, you’ll unlock a little “thanks for trying” treat.</p>
+        </div>
+      </div>
+
+      <!-- Right: Chat -->
+      <div class="md:w-2/3 flex flex-col">
+        <!-- Chat log -->
+        <div id="chat-log" class="flex-1 overflow-y-auto p-4 space-y-3 bg-white">
+          <!-- Messages injected here -->
+        </div>
+
+        <!-- Coupon / counter -->
+        <div class="border-t border-neutral-200 px-4 py-2 flex items-center justify-between text-[11px]">
+          <div>
+            <span id="message-count" class="font-mono font-semibold">0</span>
+            <span class="text-neutral-500"> messages sent</span>
+          </div>
+          <div id="coupon" class="hidden text-emerald-700 font-semibold">
+            🎁 You’ve unlocked a free RXBAR: use code <span class="font-mono">NOBS-PTO-15</span>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <form id="chat-form" class="border-t border-neutral-200 p-3 flex gap-2">
+          <input
+            id="chat-input"
+            type="text"
+            placeholder="Explain why you need to contact them..."
+            class="flex-1 text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-black focus:border-black"
+            autocomplete="off"
+          />
+          <button
+            id="chat-send"
+            type="submit"
+            class="px-4 py-2 text-sm bg-black text-white rounded-lg hover:bg-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 🔧 CHANGE THIS to your backend URL
+    const BACKEND_URL = "https://your-backend-url.com/chat";
+
+    const chatLog = document.getElementById("chat-log");
+    const chatForm = document.getElementById("chat-form");
+    const chatInput = document.getElementById("chat-input");
+    const chatSend = document.getElementById("chat-send");
+    const messageCountEl = document.getElementById("message-count");
+    const couponEl = document.getElementById("coupon");
+
+    // conversation history we send to the backend
+    const messages = [];
+
+    // how many user messages they’ve sent
+    let userMessageCount = 0;
+    let isWaitingForReply = false;
+
+    // Helper: render a single bubble
+    function addMessage(role, text) {
+      const wrapper = document.createElement("div");
+      wrapper.className = role === "user"
+        ? "flex justify-end"
+        : "flex justify-start";
+
+      const bubble = document.createElement("div");
+      bubble.className =
+        role === "user"
+          ? "max-w-[80%] bg-black text-white text-xs md:text-sm px-3 py-2 rounded-xl rounded-br-sm"
+          : "max-w-[80%] bg-neutral-100 text-neutral-900 text-xs md:text-sm px-3 py-2 rounded-xl rounded-bl-sm border border-neutral-200";
+
+      bubble.textContent = text;
+      wrapper.appendChild(bubble);
+      chatLog.appendChild(wrapper);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function updateMessageCount() {
+      messageCountEl.textContent = String(userMessageCount);
+      if (userMessageCount >= 15) {
+        couponEl.classList.remove("hidden");
+      }
+    }
+
+    function setTypingIndicator(show) {
+      let existing = document.getElementById("typing-indicator");
+      if (show) {
+        if (!existing) {
+          existing = document.createElement("div");
+          existing.id = "typing-indicator";
+          existing.className = "flex justify-start";
+          existing.innerHTML = `
+            <div class="inline-flex items-center gap-1 px-3 py-2 rounded-full bg-neutral-100 border border-neutral-200 text-[11px] text-neutral-500">
+              <span class="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse [animation-delay:150ms]"></span>
+              <span class="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-pulse [animation-delay:300ms]"></span>
+            </div>
+          `;
+          chatLog.appendChild(existing);
+        }
+      } else if (existing) {
+        existing.remove();
+      }
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    async function sendToBackend() {
+      if (messages.length === 0) return;
+
+      const body = {
+        messages: messages.map(m => ({ role: m.role, content: m.text })),
+      };
+
+      try {
+        isWaitingForReply = true;
+        chatSend.disabled = true;
+        setTypingIndicator(true);
+
+        const res = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          throw new Error("Request failed");
+        }
+
+        const data = await res.json();
+        const reply = data.reply || "(The gatekeeper is refusing to answer correctly.)";
+
+        messages.push({ role: "assistant", text: reply });
+        setTypingIndicator(false);
+        addMessage("assistant", reply);
+      } catch (err) {
+        setTypingIndicator(false);
+        addMessage(
+          "assistant",
+          "Something went wrong on my side. Try again in a moment, or consider that this might be a sign not to contact them."
+        );
+      } finally {
+        isWaitingForReply = false;
+        chatSend.disabled = false;
+        chatInput.focus();
+      }
+    }
+
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (isWaitingForReply) return;
+
+      const text = chatInput.value.trim();
+      if (!text) return;
+
+      chatInput.value = "";
+
+      messages.push({ role: "user", text });
+      addMessage("user", text);
+
+      userMessageCount += 1;
+      updateMessageCount();
+
+      sendToBackend();
+    });
+
+    // Initial assistant message (local, not GPT)
+    (function init() {
+      const intro =
+        "Hi. I’m the No B.S. gatekeeper for someone who is currently on PTO. " +
+        "My job is to rigorously evaluate whether you actually need to contact them. " +
+        "Start by telling me what this is about.";
+      messages.push({ role: "assistant", text: intro });
+      addMessage("assistant", intro);
+      updateMessageCount();
+    })();
+  </script>
+</body>
+</html>
